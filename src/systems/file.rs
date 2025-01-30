@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use sha1::{Digest, Sha1};
 use tokio::{
@@ -30,10 +30,11 @@ impl FileSystem {
         torrent_info: &Info,
         piece_length: u32,
         hashes: Vec<Vec<u8>>,
+        torrent_path: &PathBuf
     ) -> Self {
         Self {
             receiver: rx,
-            files: Self::create_files(torrent_info).await,
+            files: Self::create_files(torrent_info, torrent_path).await,
             piece_length,
             piece_hashes: hashes,
         }
@@ -82,7 +83,7 @@ impl FileSystem {
         }
     }
 
-    pub async fn create_files(torrent_info: &Info) -> HashMap<(usize, usize), File> {
+    pub async fn create_files(torrent_info: &Info, torrent_path: &PathBuf) -> HashMap<(usize, usize), File> {
         let mut files = HashMap::new();
         let mut range_offset = 0;
         match torrent_info {
@@ -93,7 +94,7 @@ impl FileSystem {
             }
             Info::MultiFile(multi_file_info) => {
                 for file_entry in &multi_file_info.files {
-                    let (file_name, dir) = Self::get_directory_path(file_entry.path.clone());
+                    let (file_name, dir) = Self::get_directory_path(file_entry.path.clone(), torrent_path);
 
                     // TODO: Error handling
                     create_dir_all(&dir).await.unwrap();
@@ -124,9 +125,11 @@ impl FileSystem {
 
     // file
     // dir
-    pub fn get_directory_path(mut raw: Vec<String>) -> (String, String) {
+    pub fn get_directory_path(mut raw: Vec<String>, torrent_path: &PathBuf) -> (String, String) {
         let file_name = raw.pop().unwrap();
-        let mut dir = String::from("");
+        let path = torrent_path.to_string_lossy();
+        let path = &path[0..path.len()-8]; // strip the .torrent
+        let mut dir = format!("{}/", path);
         for entry in raw {
             dir += &format!("{}/", entry);
         }

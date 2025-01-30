@@ -4,13 +4,13 @@ use std::{
 };
 
 use byteorder::{BigEndian, WriteBytesExt};
-use tokio::{io, net::TcpStream, time::timeout};
+use tokio::{io::{self, AsyncReadExt}, net::TcpStream, time::timeout};
 
 use crate::ser::tracker::PeerEntity;
 
 pub const HANDSHAKE_PREFIX: [u8; 4] = [19, 66, 105, 116];
 // TODO:
-pub const _KEEP_ALIVE_PAYLOAD: [u8; 4] = [0, 0, 0, 0];
+pub const KEEP_ALIVE_PAYLOAD: [u8; 4] = [0, 0, 0, 0];
 
 pub async fn connect_with_timeout(
     addr: SocketAddr,
@@ -81,6 +81,22 @@ pub fn create_request_message(piece_index: u32, begin: u32, length: u32) -> Vec<
     message.write_u32::<BigEndian>(begin).unwrap();
     message.write_u32::<BigEndian>(length).unwrap();
     message
+}
+
+pub async fn read_exact_timeout<T: AsyncReadExt + Unpin>(stream: &mut T, length: usize, duration: Duration) -> Result<[u8; 4], std::io::Error> {
+    let mut buf = vec![0; length];
+    match timeout(duration, stream.read_exact(&mut buf)).await {
+        Ok(e) => {
+            if e.is_err() {
+                Err(e.unwrap_err())
+            } else {
+                return Ok(buf[0..4].try_into().unwrap())
+            }
+        },
+        Err(e) => {
+            Err(e.into())
+        },
+    }
 }
 
 pub mod types {

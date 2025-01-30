@@ -35,7 +35,7 @@ pub enum InternalPeerMessage {
 }
 
 pub struct NetworkSystem {
-    pub(self) peers_system: PeersSystem,
+    pub(crate) peers_system: PeersSystem,
     pub(self) internal_receiver: Receiver<InternalPeerMessage>,
     pub(self) block_tx: Sender<Block>,
     pub(crate) pieces_queue: Arc<Mutex<BitVec<u8, Msb0>>>,
@@ -159,12 +159,13 @@ impl NetworkSystem {
 
         spawn(async move {
             loop {
-                sleep(Duration::from_millis(1_000)).await;
+                sleep(Duration::from_millis(500)).await;
 
                 let pieces_to_request = {
                     let queue_guard = queue_clone.lock().await;
                     let queue: &BitVec<u8, Msb0> = &queue_guard;
-                    choose_random_bit_indices(&queue, 20)
+                    // default pieces to 5% of the file
+                    choose_random_bit_indices(&queue, 50)
                 };
 
                 for piece in pieces_to_request {

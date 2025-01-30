@@ -2,7 +2,7 @@ use anyhow::Context;
 
 use crate::ser::{torrent::{Torrent, TrackerProtocol}, tracker::{construct_tracker_request, TrackerResponse}};
 
-pub async fn handle_tracker_request(torrent: &Torrent, protocol: TrackerProtocol) -> anyhow::Result<TrackerResponse> {
+pub async fn handle_tracker_request(announce: &String, info_hash: &[u8; 20], protocol: &TrackerProtocol) -> anyhow::Result<TrackerResponse> {
     match protocol {
         TrackerProtocol::UDP => {
             // let stream = UdpSocket::bind("udp://tracker.opentrackr.org:1337").await?;
@@ -15,7 +15,7 @@ pub async fn handle_tracker_request(torrent: &Torrent, protocol: TrackerProtocol
             unimplemented!();
         }
         TrackerProtocol::HTTP => {
-            let url = construct_tracker_request(torrent).context("Constructing tracker URL")?; 
+            let url = construct_tracker_request(announce, info_hash).context("Constructing tracker URL")?; 
             
             let request = reqwest::get(url)
                 .await

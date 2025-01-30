@@ -8,7 +8,7 @@ pub struct TrackerResponse {
     pub peers: Vec<PeerEntity>
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct PeerEntity {
     pub ip: String,
     pub port: u16
@@ -25,8 +25,7 @@ pub struct TrackerRequest {
 }
 
 // string is the request URL
-pub fn construct_tracker_request(torrent: &Torrent) -> anyhow::Result<String> {
-    let info_hash = torrent.info_hash;
+pub fn construct_tracker_request(announce: &String, info_hash: &[u8; 20]) -> anyhow::Result<String> {
 
     let request = TrackerRequest {
         peer_id: String::from("00112233445566778899"),
@@ -37,7 +36,7 @@ pub fn construct_tracker_request(torrent: &Torrent) -> anyhow::Result<String> {
         // compact: 0
     };
 
-    let url = format!("{}?{}&info_hash={}", torrent.announce, serde_urlencoded::to_string(request)?, urlencode(&info_hash));
+    let url = format!("{}?{}&info_hash={}", announce, serde_urlencoded::to_string(request)?, urlencode(&info_hash));
 
     Ok(url)
 }

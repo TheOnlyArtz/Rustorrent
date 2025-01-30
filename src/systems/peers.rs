@@ -7,10 +7,12 @@ use tokio::{
     spawn,
     sync::{mpsc::Sender, Mutex, RwLock},
     task::JoinHandle,
+    time::sleep,
 };
 
 use crate::utils::network::{
-    connect_with_timeout, construct_handshake_payload, types::MessageType, HANDSHAKE_PREFIX,
+    connect_with_timeout, construct_handshake_payload, read_exact_timeout, types::MessageType,
+    HANDSHAKE_PREFIX, KEEP_ALIVE_PAYLOAD,
 };
 
 use super::network::InternalPeerMessage;
@@ -163,62 +165,83 @@ impl PeersSystem {
 
             let writer = Arc::new(Mutex::new(writer));
             loop {
-                let mut length_buffer: [u8; 4] = [0; 4];
-                if let Err(_) = reader.read_exact(&mut length_buffer).await {
-                    break;
+                tokio::select! {
+                    length_buffer = read_exact_timeout(&mut reader, 4, Duration::from_millis(10)) => {
+
+                        if length_buffer.is_err() {
+                            let e = length_buffer.unwrap_err().kind();
+                            match e {
+                                std::io::ErrorKind::TimedOut => {
+                                    continue;
+                                }
+                                _ =>
+                                    break
+                            }
+                        }
+
+                        let length_buffer = length_buffer.unwrap();
+                        if length_buffer == HANDSHAKE_PREFIX {
+                            let mut trash_buffer: [u8; 64] = [0u8; 64];
+                            // TODO: ERROR HANDLE
+                            let _ = reader.read_exact(&mut trash_buffer).await;
+
+                            // Add peer now since we've handshaken
+                            Self::add_peer(peers_arc.clone(), socket_address, writer.clone()).await;
+                            continue;
+                        }
+
+                        let length: u32 = u32::from_be_bytes(length_buffer);
+                        let mut buffer = vec![0; length as usize];
+                        let read = reader.read_exact(&mut buffer).await;
+
+                        if read.is_err() {
+                            // if a connection is getting broken we would like to
+                            // "choke" the peer
+                            let _ = internal_sender
+                                .send(InternalPeerMessage::Choke(socket_address))
+                                .await;
+                            break;
+                        }
+
+                        if read.unwrap() == 0 {
+                            continue;
+                        }
+
+                        let code: MessageType = buffer[0].try_into().unwrap();
+                        let raw = &buffer[1..];
+
+                        let _ = match code {
+                            MessageType::Choke => {
+                                internal_sender
+                                    .send(InternalPeerMessage::Choke(socket_address))
+                                    .await
+                            }
+                            MessageType::Unchoke => {
+                                internal_sender
+                                    .send(InternalPeerMessage::Unchoke(socket_address))
+                                    .await
+                            }
+                            MessageType::Bitfield => {
+                                internal_sender
+                                    .send(InternalPeerMessage::Bitfield(socket_address, raw.to_vec()))
+                                    .await
+                            }
+                            MessageType::Piece => {
+                                internal_sender
+                                    .send(InternalPeerMessage::Piece(socket_address, raw.to_vec()))
+                                    .await
+                            }
+                            _ => {
+                                println!("{:?}", code);
+                                Ok(())
+                            }
+                        };
+                    }
+                    _ = sleep(Duration::from_secs(110)) => {
+                        // send keep-alive
+                        let _ = writer.lock().await.write(&KEEP_ALIVE_PAYLOAD).await;
+                    }
                 }
-
-                if length_buffer == HANDSHAKE_PREFIX {
-                    let mut trash_buffer: [u8; 64] = [0u8; 64];
-                    // TODO: ERROR HANDLE
-                    let _ = reader.read_exact(&mut trash_buffer).await;
-
-                    // Add peer now since we've handshaken
-                    Self::add_peer(peers_arc.clone(), socket_address, writer.clone()).await;
-                    continue;
-                }
-
-                let length: u32 = u32::from_be_bytes(length_buffer);
-                let mut buffer = vec![0; length as usize];
-                let read = reader.read_exact(&mut buffer).await;
-
-                if read.is_err() {
-                    break;
-                }
-
-                if read.unwrap() == 0 {
-                    continue;
-                }
-
-                let code: MessageType = buffer[0].try_into().unwrap();
-                let raw = &buffer[1..];
-
-                let _ = match code {
-                    MessageType::Choke => {
-                        internal_sender
-                            .send(InternalPeerMessage::Choke(socket_address))
-                            .await
-                    }
-                    MessageType::Unchoke => {
-                        internal_sender
-                            .send(InternalPeerMessage::Unchoke(socket_address))
-                            .await
-                    }
-                    MessageType::Bitfield => {
-                        internal_sender
-                            .send(InternalPeerMessage::Bitfield(socket_address, raw.to_vec()))
-                            .await
-                    }
-                    MessageType::Piece => {
-                        internal_sender
-                            .send(InternalPeerMessage::Piece(socket_address, raw.to_vec()))
-                            .await
-                    }
-                    _ => {
-                        println!("{:?}", code);
-                        Ok(())
-                    }
-                };
             }
         })
     }

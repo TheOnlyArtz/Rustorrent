@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use anyhow::Context;
-use ser::torrent::extract_piece_info;
+use ser::{torrent::extract_piece_info, tracker::PeerEntity};
 use systems::{
     file::{Block, FileSystem},
     network::{InternalPeerMessage, NetworkSystem},
@@ -20,17 +20,42 @@ mod utils;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let path: PathBuf = PathBuf::from("Seth.Meyers.2025.01.29.Gretchen.Whitmer.720p.HEVC.x265-MeGusta[EZTVx.to].mkv.torrent");
+    let path: PathBuf = PathBuf::from("ubuntu-24.10-desktop-amd64.iso.torrent");
     let (mut torrent, protocol) = open_dot_torrent(&path)
         .await
         .context("Handling .torrent file")?;
 
     torrent.compute_info_hash();
-
     let info_hash = torrent.info_hash;
-    let tracker_response = handle_tracker_request(&torrent, protocol).await?;
+
+    let mut peers: Vec<PeerEntity> = vec![];
+    for announce in &[
+        torrent.announce_list.clone(),
+        vec![vec![torrent.announce.clone()]],
+    ]
+    .concat()
+    {
+        let tracker_response = handle_tracker_request(&announce[0], &info_hash, &protocol).await;
+
+        match tracker_response {
+            Ok(t) => {
+                t.peers.iter().to_owned().for_each(|x| {
+                    if !peers.iter().any(|peer| x.ip == peer.ip) {
+                        peers.push(x.clone())
+                    }
+                });
+            }
+            _ => {}
+        }
+    }
+
+    if peers.len() == 0 {
+        println!("It's your unlucky day, NO PEERS WERE FOUND");
+        return Ok(());
+    }
+
     let (piece_length, pieces_amount, overall_file_length, hashes) = extract_piece_info(&torrent);
-    let peers_addresses = parse_peers_data(&tracker_response.peers);
+    let peers_addresses = parse_peers_data(&peers);
 
     // Internal messaging channels (message passing)
     let (internal_tx, internal_rx) = mpsc::channel::<InternalPeerMessage>(1024);
@@ -50,7 +75,8 @@ async fn main() -> anyhow::Result<()> {
         piece_length,
         overall_file_length,
     );
-    let mut file_system = FileSystem::new(block_rx, &torrent.info, piece_length, hashes).await;
+    let mut file_system =
+        FileSystem::new(block_rx, &torrent.info, piece_length, hashes, &path).await;
 
     let _ = spawn(async move {
         file_system.start().await;
@@ -58,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Progress bar management
     let network_system_clone = network_system.pieces_queue.clone();
+    let unchoked_peers_clone = network_system.peers_system.unchoked_peers.clone();
     spawn(async move {
         let mut stdout = stdout();
         loop {
@@ -69,6 +96,16 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .unwrap();
 
+            stdout
+                .write(
+                    format!(
+                        "\nActive peers: {}\n",
+                        unchoked_peers_clone.read().await.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
             let remaining = network_system_clone.lock().await.count_ones();
             let download_perc = (1.0 - remaining as f32 / pieces_amount as f32) * 100.0;
             let mut progress_bar = "".to_string();
@@ -87,16 +124,15 @@ async fn main() -> anyhow::Result<()> {
 
             if download_perc.floor() == 100.0 {
                 stdout
-                .write(format!("🎉🎉 FINISHED 🎉🎉").as_bytes())
-                .await
-                .unwrap();
+                    .write(format!("🎉🎉 FINISHED 🎉🎉").as_bytes())
+                    .await
+                    .unwrap();
                 stdout.flush().await.unwrap();
 
                 break;
             }
 
             stdout.flush().await.unwrap();
-
         }
     });
 

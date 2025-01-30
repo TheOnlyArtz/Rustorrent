@@ -15,6 +15,8 @@ pub enum TrackerProtocol {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Torrent {
     pub announce: String, // The tracker IP
+    #[serde(rename="announce-list")]
+    pub announce_list: Vec<Vec<String>>, // The tracker IP
     pub info: Info,
     #[serde(skip_deserializing)]
     pub info_hash: [u8; 20],
