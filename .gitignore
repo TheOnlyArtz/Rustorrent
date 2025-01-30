@@ -1,0 +1,6 @@
+target/
+Cargo.lock
+*.tgz
+*.pdf
+*.torrent
+*.iso
