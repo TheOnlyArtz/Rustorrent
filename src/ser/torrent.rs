@@ -113,8 +113,8 @@ where
     ByteBuf::from(flattened).serialize(serializer)
 }
 
-pub fn extract_piece_info(torrent: &Torrent) -> (u32, u32, usize, Vec<Vec<u8>>) {
-    match &torrent.info {
+pub fn extract_piece_info(info: &Info) -> (u32, u32, usize, Vec<Vec<u8>>) {
+    match &info {
         Info::SingleFile(f) => {
             let l = f.piece_length;
             let a = ((f.length as f32) / l as f32).ceil() as u32;

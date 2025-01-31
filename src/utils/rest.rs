@@ -1,22 +1,16 @@
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 
-use crate::ser::{torrent::{Torrent, TrackerProtocol}, tracker::{construct_tracker_request, TrackerResponse}};
+use crate::ser::tracker::{construct_tracker_request, TrackerResponse};
 
-pub async fn handle_tracker_request(announce: &String, info_hash: &[u8; 20], protocol: &TrackerProtocol) -> anyhow::Result<TrackerResponse> {
-    match protocol {
-        TrackerProtocol::UDP => {
-            // let stream = UdpSocket::bind("udp://tracker.opentrackr.org:1337").await?;
-            // let mut buf = [0; 1024];
-            // loop {
-            //     let (len, addr) = stream.recv_from(&mut buf).await?;
-            //     println!("{:?}", String::from_utf8_lossy(&buf));
+pub async fn handle_tracker_request(
+    announce: &String,
+    info_hash: &[u8; 20],
+) -> anyhow::Result<TrackerResponse> {
+    match &announce[0..4] {
+        "http" => {
+            let url = construct_tracker_request(announce, info_hash)
+                .context("Constructing tracker URL")?;
 
-            // }
-            unimplemented!();
-        }
-        TrackerProtocol::HTTP => {
-            let url = construct_tracker_request(announce, info_hash).context("Constructing tracker URL")?; 
-            
             let request = reqwest::get(url)
                 .await
                 .context("GET request to tracker")?
@@ -25,6 +19,6 @@ pub async fn handle_tracker_request(announce: &String, info_hash: &[u8; 20], pro
 
             Ok(serde_bencode::from_bytes(&request).context("Tracker Response")?)
         }
+        _ => Err(anyhow!("Unimplemented")),
     }
-
 }

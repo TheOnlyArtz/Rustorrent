@@ -26,6 +26,7 @@ use super::network::InternalPeerMessage;
 pub struct PeersSystem {
     pub peers: Arc<RwLock<HashMap<SocketAddr, Arc<Peer>>>>,
     pub unchoked_peers: Arc<RwLock<Vec<SocketAddr>>>,
+    pub internal_tx: Sender<InternalPeerMessage>
 }
 
 pub struct Peer {
@@ -34,10 +35,11 @@ pub struct Peer {
 }
 
 impl PeersSystem {
-    pub fn new() -> Self {
+    pub fn new(sender: Sender<InternalPeerMessage>) -> Self {
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
             unchoked_peers: Arc::new(RwLock::new(vec![])),
+            internal_tx: sender
         }
     }
 
@@ -129,12 +131,11 @@ impl PeersSystem {
     }
     pub async fn start(
         &mut self,
-        internal_sender: Sender<InternalPeerMessage>,
         raw_socket_addresses: Vec<SocketAddr>,
         info_hash: [u8; 20],
     ) {
         for socket_address in raw_socket_addresses {
-            self.handle_peer(internal_sender.clone(), socket_address, info_hash)
+            self.handle_peer(self.internal_tx.clone(), socket_address, info_hash)
                 .await;
         }
     }

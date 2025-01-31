@@ -35,14 +35,15 @@ pub enum InternalPeerMessage {
 }
 
 pub struct NetworkSystem {
-    pub(crate) peers_system: PeersSystem,
-    pub(self) internal_receiver: Receiver<InternalPeerMessage>,
-    pub(self) block_tx: Sender<Block>,
-    pub(crate) pieces_queue: Arc<Mutex<BitVec<u8, Msb0>>>,
+    pub peers_system: PeersSystem,
+    pub internal_receiver: Receiver<InternalPeerMessage>,
+    pub block_tx: Sender<Block>,
+    pub pieces_queue: Arc<Mutex<BitVec<u8, Msb0>>>,
 
-    pub(self) piece_length: u32,
-    pub(self) piece_amount: u32,
-    pub(self) file_length: usize,
+    pub piece_length: u32,
+    pub piece_amount: u32,
+    pub file_length: usize,
+    pub peers_addresses: Vec<SocketAddr>,
 }
 
 impl NetworkSystem {
@@ -63,12 +64,18 @@ impl NetworkSystem {
             piece_length,
             file_length,
             block_tx,
+
+            peers_addresses: vec![],
         }
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self, info_hash: &[u8; 20]) {
         // Start piece requesting loop
         // it starts it's own thread
+        self.peers_system
+            .start(self.peers_addresses.clone(), *info_hash)
+            .await;
+
         self.piece_request_loop().await;
 
         while let Some(msg) = self.internal_receiver.recv().await {
@@ -87,6 +94,10 @@ impl NetworkSystem {
                 }
             }
         }
+    }
+
+    pub fn assign_peers(&mut self, peers: Vec<SocketAddr>) {
+        self.peers_addresses = peers;
     }
 
     pub async fn handle_choke(&mut self, socket_address: SocketAddr) {
